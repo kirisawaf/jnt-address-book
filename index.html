@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#b91c1c">
+  <title>J&T Courier Address Book</title>
+  <link rel="manifest" href="manifest.json">
+  <style>
+    :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#171717;background:#f5f5f5}
+    *{box-sizing:border-box}body{margin:0}header{background:#b91c1c;color:white;padding:20px 16px}
+    header h1{font-size:21px;margin:0 0 4px}header p{margin:0;font-size:13px;opacity:.9}
+    main{max-width:720px;margin:auto;padding:14px}.card{background:white;border-radius:14px;padding:15px;margin:0 0 13px;box-shadow:0 1px 4px #00000012}
+    .stats{display:flex;gap:10px}.stat{flex:1;background:#fff;border-radius:12px;padding:13px}.stat b{display:block;font-size:24px}
+    label{display:block;font-size:13px;font-weight:650;margin:12px 0 5px}input,textarea{width:100%;padding:12px;border:1px solid #d4d4d4;border-radius:9px;font:inherit;background:white}
+    textarea{min-height:76px;resize:vertical}button{border:0;border-radius:9px;padding:12px 14px;font:inherit;font-weight:650;cursor:pointer}
+    .primary{background:#b91c1c;color:white}.secondary{background:#f1f1f1;color:#222}.danger{background:#fee2e2;color:#991b1b}
+    .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.actions button{flex:1}
+    .muted{color:#666;font-size:13px}.customer{border-top:1px solid #eee;padding:13px 0}.customer:first-child{border-top:0}
+    .customer h3{margin:0 0 5px;font-size:16px}.customer p{margin:4px 0;font-size:14px;white-space:pre-wrap}
+    .hidden{display:none!important}.status{padding:10px;border-radius:9px;background:#fff7ed;color:#9a3412;font-size:13px;margin-bottom:12px}
+    .small{font-size:12px}.topline{display:flex;justify-content:space-between;gap:10px;align-items:center}
+  </style>
+</head>
+<body>
+<header><h1>J&T Courier Address Book</h1><p>Buku alamat pelanggan pribadi</p></header>
+<main>
+  <div id="status" class="status">Aplikasi belum terhubung ke Firebase. Lengkapi konfigurasi terlebih dahulu.</div>
+  <section id="loginCard" class="card">
+    <h2 style="font-size:18px;margin:0 0 8px">Masuk</h2>
+    <p class="muted">Masuk dengan akun Google yang akan kamu gunakan untuk menyimpan database pribadi.</p>
+    <button id="loginBtn" class="primary">Masuk dengan Google</button>
+  </section>
+  <section id="app" class="hidden">
+    <div class="topline" style="margin-bottom:12px"><span id="userEmail" class="muted"></span><button id="logoutBtn" class="secondary">Keluar</button></div>
+    <div class="stats">
+      <div class="stat"><b id="totalCount">0</b><span class="muted">Pelanggan</span></div>
+      <div class="stat"><b id="gpsCount">0</b><span class="muted">Lokasi GPS</span></div>
+    </div>
+    <section class="card" style="margin-top:13px">
+      <h2 style="font-size:18px;margin:0">Tambah pelanggan</h2>
+      <form id="customerForm">
+        <label for="name">Nama pelanggan</label><input id="name" required maxlength="100" placeholder="Nama penerima">
+        <label for="address">Alamat lengkap</label><textarea id="address" required maxlength="500" placeholder="Jalan, nomor rumah, kelurahan, kecamatan"></textarea>
+        <label for="landmark">Patokan rumah</label><textarea id="landmark" maxlength="500" placeholder="Contoh: pagar hitam, dekat masjid, gang di samping toko"></textarea>
+        <label>Koordinat GPS</label><p id="gpsText" class="muted">Belum mengambil lokasi.</p>
+        <button type="button" id="gpsBtn" class="secondary">Ambil GPS lokasi saya</button>
+        <div class="actions"><button type="submit" class="primary">Simpan pelanggan</button><button type="reset" id="resetBtn" class="secondary">Kosongkan</button></div>
+      </form>
+      <p class="muted small">Ambil GPS saat kamu sudah berada di depan rumah yang benar. Izinkan akses lokasi pada browser.</p>
+    </section>
+    <section class="card">
+      <h2 style="font-size:18px;margin:0 0 10px">Cari pelanggan</h2>
+      <input id="search" placeholder="Cari nama, alamat, atau patokan...">
+      <div id="customerList" style="margin-top:10px"><p class="muted">Belum ada data.</p></div>
+    </section>
+  </section>
+  <p class="muted small">Simpan hanya informasi yang diperlukan untuk pengantaran. Jaga kerahasiaan alamat dan jangan bagikan akses database kepada orang lain.</p>
+</main>
+<script type="module">
+  // Konfigurasi Firebase untuk project JNT-02-Address.
+  const firebaseConfig = {
+    apiKey: "AIzaSyA5Ll-xhuK5cZ2miK7kCOw8fQfS9TSsBCI",
+    authDomain: "jnt-02-address.firebaseapp.com",
+    projectId: "jnt-02-address",
+    storageBucket: "jnt-02-address.firebasestorage.app",
+    messagingSenderId: "505387338821",
+    appId: "1:505387338821:web:9f1909df518caef35fe72c",
+    measurementId: "G-DZ76GPBYCQ"
+  };
+
+  const statusEl = document.getElementById("status");
+  const loginCard = document.getElementById("loginCard");
+  const appEl = document.getElementById("app");
+  const gpsText = document.getElementById("gpsText");
+  let db, auth, currentUser, customers = [], gps = null, editId = null;
+  let modulesReady = false;
+
+  const configured = !Object.values(firebaseConfig).some(v => String(v).startsWith("ISI_"));
+  if (configured) {
+    try {
+      const [{initializeApp}, authMod, dbMod] = await Promise.all([
+        import("https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js"),
+        import("https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js"),
+        import("https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js")
+      ]);
+      const app = initializeApp(firebaseConfig);
+      auth = authMod.getAuth(app); db = dbMod.getFirestore(app);
+      window.__fb = {authMod,dbMod};
+      modulesReady = true;
+      statusEl.textContent = "Terhubung ke konfigurasi Firebase. Silakan masuk.";
+      authMod.onAuthStateChanged(auth, async user => {
+        currentUser = user;
+        loginCard.classList.toggle("hidden", !!user);
+        appEl.classList.toggle("hidden", !user);
+        if (user) {
+          document.getElementById("userEmail").textContent = user.email || "Akun Google";
+          await loadCustomers();
+        } else { customers=[]; render(); }
+      });
+    } catch(e) { statusEl.textContent = "Gagal menghubungkan Firebase: " + e.message; }
+  }
+
+  document.getElementById("loginBtn").onclick = async () => {
+    if (!modulesReady) return alert("Firebase belum dikonfigurasi. Ikuti README terlebih dahulu.");
+    const provider = new window.__fb.authMod.GoogleAuthProvider();
+    try { await window.__fb.authMod.signInWithRedirect(auth, provider); }
+    catch(e) { alert("Gagal masuk: " + e.message); }
+  };
+  document.getElementById("logoutBtn").onclick = () => window.__fb.authMod.signOut(auth);
+  document.getElementById("gpsBtn").onclick = () => {
+    if (!navigator.geolocation) return alert("Browser ini tidak mendukung GPS.");
+    gpsText.textContent = "Mengambil lokasi...";
+    navigator.geolocation.getCurrentPosition(pos => {
+      gps = {lat:pos.coords.latitude, lng:pos.coords.longitude};
+      gpsText.textContent = `${gps.lat.toFixed(6)}, ${gps.lng.toFixed(6)} (akurasi sekitar ${Math.round(pos.coords.accuracy)} meter)`;
+    }, err => { gpsText.textContent = "Lokasi gagal diambil: " + err.message; },
+      {enableHighAccuracy:true, timeout:20000, maximumAge:0});
+  };
+
+  async function loadCustomers() {
+    const {collection,getDocs,query,orderBy} = window.__fb.dbMod;
+    const q = query(collection(db,"users",currentUser.uid,"customers"), orderBy("nameLower"));
+    const snap = await getDocs(q);
+    customers = snap.docs.map(d=>({id:d.id,...d.data()}));
+    render();
+  }
+  document.getElementById("customerForm").onsubmit = async e => {
+    e.preventDefault();
+    if (!currentUser) return;
+    const {collection,addDoc,doc,updateDoc,serverTimestamp} = window.__fb.dbMod;
+    const data = {
+      name:document.getElementById("name").value.trim(),
+      nameLower:document.getElementById("name").value.trim().toLowerCase(),
+      address:document.getElementById("address").value.trim(),
+      landmark:document.getElementById("landmark").value.trim(),
+      gps:gps, updatedAt:serverTimestamp()
+    };
+    try {
+      if (editId) await updateDoc(doc(db,"users",currentUser.uid,"customers",editId),data);
+      else await addDoc(collection(db,"users",currentUser.uid,"customers"),{...data,createdAt:serverTimestamp()});
+      e.target.reset(); gps=null; editId=null; gpsText.textContent="Belum mengambil lokasi.";
+      document.querySelector("#customerForm button[type=submit]").textContent="Simpan pelanggan";
+      await loadCustomers();
+      alert("Data pelanggan berhasil disimpan.");
+    } catch(err) { alert("Gagal menyimpan: "+err.message); }
+  };
+  document.getElementById("resetBtn").onclick = () => {gps=null;editId=null;gpsText.textContent="Belum mengambil lokasi.";};
+  document.getElementById("search").oninput = render;
+
+  function render() {
+    const list = document.getElementById("customerList");
+    const term = (document.getElementById("search")?.value || "").toLowerCase().trim();
+    const filtered = customers.filter(c => [c.name,c.address,c.landmark].join(" ").toLowerCase().includes(term));
+    document.getElementById("totalCount").textContent = customers.length;
+    document.getElementById("gpsCount").textContent = customers.filter(c=>c.gps).length;
+    if (!filtered.length) { list.innerHTML='<p class="muted">Tidak ada pelanggan yang cocok.</p>'; return; }
+    list.innerHTML="";
+    filtered.forEach(c=>{
+      const item=document.createElement("div"); item.className="customer";
+      const h=document.createElement("h3"); h.textContent=c.name || "Tanpa nama";
+      const a=document.createElement("p"); a.textContent=c.address || "";
+      const l=document.createElement("p"); l.className="muted"; l.textContent=c.landmark ? "Patokan: "+c.landmark : "Belum ada catatan patokan";
+      item.append(h,a,l);
+      const actions=document.createElement("div"); actions.className="actions";
+      if(c.gps){const nav=document.createElement("button");nav.className="primary";nav.textContent="Navigasi Maps";nav.onclick=()=>window.open(`https://www.google.com/maps/dir/?api=1&destination=${c.gps.lat},${c.gps.lng}`,"_blank");actions.append(nav);}
+      const edit=document.createElement("button");edit.className="secondary";edit.textContent="Edit";edit.onclick=()=>{editId=c.id;document.getElementById("name").value=c.name||"";document.getElementById("address").value=c.address||"";document.getElementById("landmark").value=c.landmark||"";gps=c.gps||null;gpsText.textContent=gps?`${gps.lat}, ${gps.lng}`:"Belum mengambil lokasi.";document.querySelector("#customerForm button[type=submit]").textContent="Simpan perubahan";window.scrollTo({top:0,behavior:"smooth"});};actions.append(edit);
+      const del=document.createElement("button");del.className="danger";del.textContent="Hapus";del.onclick=async()=>{if(confirm("Hapus data pelanggan ini?")){const {doc,deleteDoc}=window.__fb.dbMod;await deleteDoc(doc(db,"users",currentUser.uid,"customers",c.id));await loadCustomers();}};actions.append(del);
+      item.append(actions);list.append(item);
+    });
+  }
+  if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
+    navigator.serviceWorker.register("./sw.js").catch(()=>{});
+  }
+</script>
+</body>
+</html>
