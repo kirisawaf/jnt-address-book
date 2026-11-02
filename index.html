@@ -94,10 +94,21 @@
         loginCard.classList.toggle("hidden", !!user);
         appEl.classList.toggle("hidden", !user);
         if (user) {
+          statusEl.textContent = "Berhasil masuk sebagai " + (user.email || "Akun Google") + ".";
           document.getElementById("userEmail").textContent = user.email || "Akun Google";
-          await loadCustomers();
+          try { await loadCustomers(); }
+          catch (e) { statusEl.textContent = "Login berhasil, tetapi gagal memuat data: " + e.message; }
         } else { customers=[]; render(); }
+      }, error => {
+        statusEl.textContent = "Status login gagal diperiksa: " + (error.code || error.message);
       });
+
+      // Ambil hasil login Google setelah browser kembali dari halaman Google.
+      try {
+        await authMod.getRedirectResult(auth);
+      } catch (e) {
+        statusEl.textContent = "Login Google gagal: " + (e.code || e.message) + ". Periksa domain dan pengaturan Google Auth.";
+      }
     } catch(e) { statusEl.textContent = "Gagal menghubungkan Firebase: " + e.message; }
   }
 
